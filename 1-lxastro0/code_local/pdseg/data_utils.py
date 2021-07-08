@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-This code is based on https://github.com/fchollet/keras/blob/master/keras/utils/data_utils.py
+This code_local is based on https://github.com/fchollet/keras/blob/master/keras/utils/data_utils.py
 """
 
 import time

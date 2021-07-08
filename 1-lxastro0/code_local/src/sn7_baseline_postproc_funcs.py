@@ -259,7 +259,7 @@ def track_footprint_identifiers(json_dir, out_dir,
                         n_new += 1
                        
                 else:
-                    # no match (same exact code as right above)
+                    # no match (same exact code_local as right above)
                     if super_verbose:
                         print("    pred_idx:", pred_idx, "no overlap, new_id:", new_id)
                     if (new_id in id_set) or (new_id == 0):

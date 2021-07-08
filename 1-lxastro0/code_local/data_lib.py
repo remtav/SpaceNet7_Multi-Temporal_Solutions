@@ -1,13 +1,19 @@
+import json
 import os
 import sys
 import multiprocessing
 import warnings
 
+from pathlib import Path
+
 warnings.filterwarnings('ignore')
 
 import pandas as pd
 import skimage
-import gdal
+try:
+    import gdal
+except ImportError:
+    from osgeo import gdal
 import numpy as np
 import cv2
 from PIL import Image
@@ -22,7 +28,10 @@ module_path = os.path.abspath(os.path.join('./src/'))
 if module_path not in sys.path:
     sys.path.append(module_path)
 from solaris.preproc.image import LoadImage, SaveImage, Resize
-from sn7_baseline_prep_funcs import map_wrapper, make_geojsons_and_masks
+try:
+    from sn7_baseline_prep_funcs import map_wrapper, make_geojsons_and_masks
+except ImportError:
+    from src.sn7_baseline_prep_funcs import map_wrapper, make_geojsons_and_masks
 
 
 # ###### common configs for divide images ######
@@ -31,8 +40,8 @@ from sn7_baseline_prep_funcs import map_wrapper, make_geojsons_and_masks
 pre_height = None  # 3072
 pre_width = None  # 3072
 # final output size
-target_height = 512
-target_width = 512
+target_height = 2048
+target_width = 2048
 # stride
 height_stride = 512
 width_stride = 512
@@ -123,6 +132,9 @@ def divide_img(img_file, save_dir='divide_imgs', inter_type=cv2.INTER_LINEAR):
     while y1 < src_im_height:
         y2 = y1 + target_height
         while x1 < src_im_width:
+            save_file = os.path.join(save_dir, basename + "_%05d_%05d" % (y1, x1) + ext)
+            if Path(save_file).is_file():
+                continue
             x2 = x1 + target_width
             img_crop = img[y1: y2, x1: x2]
             if y2 > src_im_height or x2 > src_im_width:
@@ -130,7 +142,6 @@ def divide_img(img_file, save_dir='divide_imgs', inter_type=cv2.INTER_LINEAR):
                 pad_right = x2 - src_im_width if x2 > src_im_width else 0
                 img_crop = cv2.copyMakeBorder(img_crop, 0, pad_bottom, 0, pad_right,
                                               cv2.BORDER_CONSTANT, value=padding_pixel)
-            save_file = os.path.join(save_dir, basename + "_%05d_%05d" % (y1, x1) + ext)
             Image.fromarray(img_crop).save(save_file)
             x1 += width_stride
             idx += 1
@@ -138,26 +149,43 @@ def divide_img(img_file, save_dir='divide_imgs', inter_type=cv2.INTER_LINEAR):
         y1 += height_stride
 
 
-def divide(root):
+def divide(data_json, out_dir, f3x=True):
     """
     Considering the training speed, we divide the image into small images.
     """
-    locas = [os.path.join(root, x) for x in os.listdir(root)]
-    for loca in locas:
-        if not os.path.isdir(os.path.join(root, loca)):
-            continue
-        print(loca)
-        img_path = os.path.join(loca, "images_masked_3x")
-        imgs = [os.path.join(img_path, x) for x in os.listdir(img_path)]
-        for img in imgs:
-            divide_img(img, os.path.join(loca, "images_masked_3x_divide"))
+    root = data_json.parent.parent
 
-        grt_path = os.path.join(loca, "masks_3x")
-        if not os.path.exists(grt_path):
+    with open(data_json, 'r') as fin:
+        dict_data = json.load(fin)
+
+    n_threads = 10
+    input_args = []
+    for i, aoi in enumerate(dict_data["all_images"]):
+        print(i, "aoi:", aoi)
+        if not (root/aoi['gpkg']['prem']).is_file():
+            warnings.warn(f"Geopackage file not found: {str(root/aoi['gpkg']['prem'])}")
             continue
-        grts = [os.path.join(grt_path, x) for x in os.listdir(grt_path)]
-        for grt in grts:
-            divide_img(grt, os.path.join(loca, "masks_3x_divide"), cv2.INTER_NEAREST)
+        im_dir = (root/aoi["R_band"]).parent
+        if f3x:
+            img_3x_dir = out_dir/"images_masked_3x"
+            image_path = list(img_3x_dir.glob('*3x.tif'))[0]
+        else:
+            image_path = root/aoi["R_band"]
+        if not image_path.parent.is_dir():
+            warnings.warn(f"Image directory not found: {str(image_path)}")
+            continue
+
+    assert f3x
+    img_3x_dir = out_dir / "images_masked_3x"
+    image_paths = img_3x_dir.glob('*3x.tif')
+    for i, image_path in enumerate(image_paths):
+        print(i, "aoi:", image_path)
+        divide_img(image_path, out_dir/f"images_masked_3x_tiled")
+
+    grt_3x_dir = out_dir / "masks_3x"
+    grt_paths = grt_3x_dir.glob('*3x.tif')
+    for grt_path in grt_paths:
+        divide_img(grt_path, out_dir/f"masks_3x_tiled", cv2.INTER_NEAREST)
 
 
 def compose(root):
@@ -182,79 +210,132 @@ def compose(root):
         compose_arr(v, dst)
 
 
-def enlarge_3x(root):
+def enlarge_3x(data_json, out_dir):
     """
     Enlarge the original images by 3 times.
     """
-    aois = [os.path.join(root, x) for x in os.listdir(root)]
-    for aoi in aois:
-        if not os.path.isdir(os.path.join(root, aoi)):
+    root = data_json.parent.parent
+    with open(data_json, 'r') as fin:
+        dict_data = json.load(fin)
+
+    n_threads = 10
+
+    input_args = []
+    for i, aoi in enumerate(dict_data["all_images"]):
+        print(i, "aoi:", aoi)
+        if not (root/aoi["R_band"]).parent.is_dir():
+            warnings.warn(f"Image directory not found: {str((root/aoi['R_band']).parent)}")
             continue
+
+    for i, aoi in enumerate(dict_data["all_images"]):
         print("enlarge 3x:", aoi)
-        images_masked = os.path.join(aoi, "images_masked")
-        img_files = [os.path.join(images_masked, x) for x in os.listdir(images_masked)]
-        images_masked_3x = os.path.join(aoi, "images_masked_3x")
-        if not os.path.exists(images_masked_3x):
-            os.makedirs(images_masked_3x)
-        for img_file in img_files:
+        img_file = root/aoi["R_band"]
+        out_dir_mask = out_dir / 'images_masked_3x'
+        out_img = out_dir_mask / f"{str(img_file.name).split('_')[0]}_3x.tif"
+        Path.mkdir(out_dir_mask, exist_ok=True)
+        if out_img.is_file():
+            continue
+
+        band_list = []
+        for band in "RGB":
+            img_file = root / aoi[f"{band}_band"]
+            if isinstance(img_file, Path):
+                img_file = str(img_file)
             lo = LoadImage(img_file)
             img = lo.load()
-            _, height, width = img.data.shape
+            band_list.append(img.data)
+        img.data = np.concatenate(band_list, axis=0)
+        _, height, width = img.data.shape
 
-            re = Resize(height * 3, width * 3)
-            img = re.resize(img, height * 3, width * 3)
-            assert img.data.shape[1] == height * 3
-            assert img.data.shape[2] == width * 3
+        re = Resize(height * 2, width * 2)
+        img = re.resize(img, height * 2, width * 2)
+        assert img.data.shape[1] == height * 2
+        assert img.data.shape[2] == width * 2
 
-            sa = SaveImage(img_file.replace("images_masked", "images_masked_3x"))
-            sa.transform(img)
+        # re = Resize(height * 3, width * 3)
+        # img = re.resize(img, height * 3, width * 3)
+        # assert img.data.shape[1] == height * 3
+        # assert img.data.shape[2] == width * 3
+
+        sa = SaveImage(str(out_img))
+        sa.transform(img)
 
 
-def create_label(root, f3x=True):
+        # name of output rasterized label
+        # output_path_mask = out_dir_mask/Path(str(image_path.stem).split('_BAND')[0]+'.tif')
+
+        # if debug:
+        #     make_geojsons_and_masks(name_root, image_path, gpkg, output_path_mask, layer='Table1')
+        # elif not output_path_mask.is_file():
+        #     input_args.append([make_geojsons_and_masks, name_root, image_path, gpkg, output_path_mask])
+
+def create_label(data_json, out_dir, f3x=True, debug=False):
     """
     Create label according to given json file.
     If f3x is True, it will create label that enlarged 3 times than original size.
     """
-    aois = os.listdir(root)
+    root = data_json.parent.parent
+    with open(data_json, 'r') as fin:
+        dict_data = json.load(fin)
 
     n_threads = 10
-    make_fbc = False
 
     input_args = []
-    for i, aoi in enumerate(aois):
-        if not os.path.isdir(os.path.join(root, aoi)):
-            continue
-        print(i, "aoi:", aoi)
-        im_dir = os.path.join(root, aoi, 'images_masked_3x/' if f3x else 'images_masked/')
-        json_dir = os.path.join(root, aoi, 'labels_match/')
-        out_dir_mask = os.path.join(root, aoi, 'masks_3x/' if f3x else 'masks/')
-        out_dir_mask_fbc = os.path.join(root, aoi, 'masks_fbc_3x/' if f3x else 'masks_fbc/')
-        os.makedirs(out_dir_mask, exist_ok=True)
-        if make_fbc:
-            os.makedirs(out_dir_mask_fbc, exist_ok=True)
-
-        json_files = sorted([f for f in os.listdir(os.path.join(json_dir))
-                             if f.endswith('Buildings.geojson') and os.path.exists(os.path.join(json_dir, f))])
-        for j, f in enumerate(json_files):
-            # print(i, j, f)
-            name_root = f.split('.')[0]
-            json_path = os.path.join(json_dir, f)
-            image_path = os.path.join(im_dir, name_root + '.tif').replace('labels', 'images').replace('_Buildings', '')
-            output_path_mask = os.path.join(out_dir_mask, name_root + '.tif')
-            if make_fbc:
-                output_path_mask_fbc = os.path.join(out_dir_mask_fbc, name_root + '.tif')
+    if not f3x:
+        for i, aoi in enumerate(dict_data["all_images"]):
+            print(i, "aoi:", aoi)
+            if not (root/aoi['gpkg']['prem']).is_file():
+                warnings.warn(f"Geopackage file not found: {str(root/aoi['gpkg']['prem'])}")
+                continue
+            im_dir = (root/aoi["R_band"]).parent
+            if f3x:
+                img_3x_dir = out_dir/"images_masked_3x"
+                image_path = list(img_3x_dir.glob('*3x.tif'))[0]
             else:
-                output_path_mask_fbc = None
+                image_path = root/aoi["R_band"]
+            if not image_path.parent.is_dir():
+                warnings.warn(f"Image directory not found: {str(image_path)}")
+                continue
 
-            if not os.path.exists(output_path_mask):
-                input_args.append([make_geojsons_and_masks,
-                                   name_root, image_path, json_path,
-                                   output_path_mask, output_path_mask_fbc])
+    for i, aoi in enumerate(dict_data["all_images"]):
+        mask_dir = 'masks_3x' if f3x else 'masks'
+        gpkg = root/aoi['gpkg']['prem']
+        out_dir_mask = out_dir / mask_dir
+        Path.mkdir(out_dir_mask, exist_ok=True)
+        name_root = gpkg.stem
+        r_band = root/aoi["R_band"]
+        if f3x:
+            image_path = list((out_dir/"images_masked_3x").glob(f"{str(r_band.name).split('_')[0]}*"))[0]
+            # name of output rasterized label
+            output_path_mask = out_dir_mask / image_path.name
+        else:
+            image_path = r_band
+            # name of output rasterized label
+            output_path_mask = out_dir_mask / f"{str(image_path.name).split('_')[0]}.tif"
+
+
+        if debug:
+            make_geojsons_and_masks(name_root, image_path, gpkg, output_path_mask, layer='Table1')
+        elif not output_path_mask.is_file():
+            input_args.append([make_geojsons_and_masks, name_root, image_path, gpkg, output_path_mask])
+
+    else:
+        out_dir_mask = out_dir / mask_dir
+        Path.mkdir(out_dir_mask, exist_ok=True)
+        name_root = gpkg.stem
+        img_3x_dir = out_dir.glob("*images_masked_3x")
+        for image_path in img_3x_dir:
+            output_path_mask = out_dir_mask / f"{image_path.name}_3x.tif"
+            if debug:
+                make_geojsons_and_masks(name_root, image_path, gpkg, output_path_mask, layer='Table1')
+            elif not output_path_mask.is_file():
+                input_args.append([make_geojsons_and_masks, name_root, image_path, gpkg, output_path_mask])
 
     print("len input_args", len(input_args))
     print("Execute...\n")
-    with multiprocessing.Pool(n_threads) as pool:
-        pool.map(map_wrapper, input_args)
+    if not debug:
+        with multiprocessing.Pool(n_threads) as pool:
+            pool.map(map_wrapper, input_args)
 
 
 def create_trainval_list(root):

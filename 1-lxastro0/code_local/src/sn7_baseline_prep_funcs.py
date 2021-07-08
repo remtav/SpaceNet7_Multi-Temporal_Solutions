@@ -7,6 +7,8 @@ Created on Tue Aug 25 14:11:02 2020
 """
 
 import multiprocessing
+import warnings
+
 import pandas as pd
 import numpy as np
 import skimage
@@ -24,7 +26,7 @@ def map_wrapper(x):
 
 
 def make_geojsons_and_masks(name_root, image_path, json_path, 
-                            output_path_mask, output_path_mask_fbc=None):
+                            output_path_mask, layer=None, output_path_mask_fbc=None):
     '''
     Make the stuffins
     mask_fbc is an (optional) three-channel fbc (footbrint, boundary, contact) mask
@@ -33,7 +35,7 @@ def make_geojsons_and_masks(name_root, image_path, json_path,
     print("  name_root:", name_root)
 
     # filter out null geoms (this is always a worthy check)
-    gdf_tmp = _check_gdf_load(json_path)
+    gdf_tmp = _check_gdf_load(json_path, layer=layer)
     if len(gdf_tmp) == 0:
         gdf_nonull = gdf_tmp
     else:
@@ -64,6 +66,10 @@ def make_geojsons_and_masks(name_root, image_path, json_path,
         
     # make masks (single channel)
     # https://github.com/CosmiQ/solaris/blob/master/docs/tutorials/notebooks/api_masks_tutorial.ipynb
+    is_buildings = gdf_nonull.Quatreclasses.isin([4, '4'])
+    if not is_buildings.any():
+        warnings.warn(f"No feature found in {name_root}")
+    gdf_nonull = gdf_nonull[is_buildings]
     f_mask = sol.vector.mask.df_to_px_mask(df=gdf_nonull, out_file=output_path_mask,
                                      channels=['footprint'],
                                      reference_im=image_path,
