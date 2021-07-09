@@ -10,7 +10,7 @@ mode = sys.argv[3]
 
 if mode == "train":
     dlib.create_label(data_json, out_dir, f3x=False, debug=True)
-    dlib.enlarge_3x(data_json, out_dir)
+    dlib.enlarge_3x(data_json, out_dir, debug=True)
     dlib.create_label(data_json, out_dir, f3x=True, debug=True)
     dlib.divide(data_json, out_dir)
     #dlib.create_trainval_list(data_json, out_dir)

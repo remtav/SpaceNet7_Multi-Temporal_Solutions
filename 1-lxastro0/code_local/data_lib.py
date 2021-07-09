@@ -209,7 +209,7 @@ def compose(root):
         compose_arr(v, dst)
 
 
-def enlarge_3x(data_json, out_dir):
+def enlarge_3x(data_json, out_dir, debug=False):
     """
     Enlarge the original images by 3 times.
     """
@@ -246,27 +246,28 @@ def enlarge_3x(data_json, out_dir):
         img.data = np.concatenate(band_list, axis=0)
         _, height, width = img.data.shape
 
-        re = Resize(height * 2, width * 2)
-        img = re.resize(img, height * 2, width * 2)
-        assert img.data.shape[1] == height * 2
-        assert img.data.shape[2] == width * 2
+        multiplier = 3 if not debug else 2
+        height, width = height * multiplier, width * multiplier
 
-        # re = Resize(height * 3, width * 3)
-        # img = re.resize(img, height * 3, width * 3)
-        # assert img.data.shape[1] == height * 3
-        # assert img.data.shape[2] == width * 3
+        if debug:
+            resize_save(img, out_img, height, width)
+        elif not out_img.is_file():
+            input_args.append([resize_save, out_img, height, width])
 
-        sa = SaveImage(str(out_img))
-        sa.transform(img)
+    print("len input_args", len(input_args))
+    print("Execute...\n")
+    if not debug:
+        with multiprocessing.Pool(n_threads) as pool:
+            pool.map(map_wrapper, input_args)
 
 
-        # name of output rasterized label
-        # output_path_mask = out_dir_mask/Path(str(image_path.stem).split('_BAND')[0]+'.tif')
+def resize_save(img, out_img, height, width):
+    re = Resize(height, width)
+    img = re.resize(img, height, width)
 
-        # if debug:
-        #     make_geojsons_and_masks(name_root, image_path, gpkg, output_path_mask, layer='Table1')
-        # elif not output_path_mask.is_file():
-        #     input_args.append([make_geojsons_and_masks, name_root, image_path, gpkg, output_path_mask])
+    sa = SaveImage(str(out_img))
+    sa.transform(img)
+
 
 def create_label(data_json, out_dir, f3x=True, debug=False):
     """
