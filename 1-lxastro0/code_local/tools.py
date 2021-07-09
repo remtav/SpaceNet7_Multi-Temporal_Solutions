@@ -13,10 +13,10 @@ if mode == "train":
     dlib.enlarge_3x(data_json, out_dir)
     dlib.create_label(data_json, out_dir, f3x=True, debug=True)
     dlib.divide(data_json, out_dir)
-    dlib.create_trainval_list(data_json, out_dir)
+    #dlib.create_trainval_list(data_json, out_dir)
 elif mode == "test":
-    dlib.enlarge_3x(data_json)
-    dlib.divide(data_json)
-    dlib.create_test_list(data_json)
+    dlib.enlarge_3x(data_json, out_dir)
+    dlib.divide(data_json, out_dir)
+    #dlib.create_test_list(data_json, out_dir)
 else:
     dlib.compose(data_json)

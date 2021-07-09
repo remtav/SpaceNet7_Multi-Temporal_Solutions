@@ -43,8 +43,8 @@ pre_width = None  # 3072
 target_height = 2048
 target_width = 2048
 # stride
-height_stride = 512
-width_stride = 512
+height_stride = 2048
+width_stride = 2048
 # padding, always the same as ignore pixel
 padding_pixel = 255
 
@@ -106,7 +106,7 @@ def compose_arr(divide_img_ls, compose_img_dir, ext=".npy"):
     np.save(os.path.join(compose_img_dir, file_name + ext), image)
 
 
-def divide_img(img_file, save_dir='divide_imgs', inter_type=cv2.INTER_LINEAR):
+def divide_img(img_file, save_dir='divide_imgs', inter_type=cv2.INTER_LINEAR, debug=False):
     """
     Core function of dividing images.
     """
@@ -133,16 +133,15 @@ def divide_img(img_file, save_dir='divide_imgs', inter_type=cv2.INTER_LINEAR):
         y2 = y1 + target_height
         while x1 < src_im_width:
             save_file = os.path.join(save_dir, basename + "_%05d_%05d" % (y1, x1) + ext)
-            if Path(save_file).is_file():
-                continue
-            x2 = x1 + target_width
-            img_crop = img[y1: y2, x1: x2]
-            if y2 > src_im_height or x2 > src_im_width:
-                pad_bottom = y2 - src_im_height if y2 > src_im_height else 0
-                pad_right = x2 - src_im_width if x2 > src_im_width else 0
-                img_crop = cv2.copyMakeBorder(img_crop, 0, pad_bottom, 0, pad_right,
-                                              cv2.BORDER_CONSTANT, value=padding_pixel)
-            Image.fromarray(img_crop).save(save_file)
+            if not Path(save_file).is_file():
+                x2 = x1 + target_width
+                img_crop = img[y1: y2, x1: x2]
+                if y2 > src_im_height or x2 > src_im_width:
+                    pad_bottom = y2 - src_im_height if y2 > src_im_height else 0
+                    pad_right = x2 - src_im_width if x2 > src_im_width else 0
+                    img_crop = cv2.copyMakeBorder(img_crop, 0, pad_bottom, 0, pad_right,
+                                                  cv2.BORDER_CONSTANT, value=padding_pixel)
+                Image.fromarray(img_crop).save(save_file)
             x1 += width_stride
             idx += 1
         x1 = 0
@@ -180,12 +179,12 @@ def divide(data_json, out_dir, f3x=True):
     image_paths = img_3x_dir.glob('*3x.tif')
     for i, image_path in enumerate(image_paths):
         print(i, "aoi:", image_path)
-        divide_img(image_path, out_dir/f"images_masked_3x_tiled")
+        divide_img(image_path, out_dir/f"images_masked_3x_divide")
 
     grt_3x_dir = out_dir / "masks_3x"
-    grt_paths = grt_3x_dir.glob('*3x.tif')
+    grt_paths = grt_3x_dir.glob('*3x_gt.tif')
     for grt_path in grt_paths:
-        divide_img(grt_path, out_dir/f"masks_3x_tiled", cv2.INTER_NEAREST)
+        divide_img(grt_path, out_dir/f"masks_3x_divide", cv2.INTER_NEAREST)
 
 
 def compose(root):
@@ -307,29 +306,17 @@ def create_label(data_json, out_dir, f3x=True, debug=False):
         if f3x:
             image_path = list((out_dir/"images_masked_3x").glob(f"{str(r_band.name).split('_')[0]}*"))[0]
             # name of output rasterized label
-            output_path_mask = out_dir_mask / image_path.name
+            output_path_mask = out_dir_mask / f"{image_path.stem}_gt.tif"
         else:
             image_path = r_band
             # name of output rasterized label
-            output_path_mask = out_dir_mask / f"{str(image_path.name).split('_')[0]}.tif"
+            output_path_mask = out_dir_mask / f"{str(image_path.name).split('_')[0]}_gt.tif"
 
 
         if debug:
-            make_geojsons_and_masks(name_root, image_path, gpkg, output_path_mask, layer='Table1')
+            make_geojsons_and_masks(name_root, image_path, gpkg, output_path_mask)
         elif not output_path_mask.is_file():
             input_args.append([make_geojsons_and_masks, name_root, image_path, gpkg, output_path_mask])
-
-    else:
-        out_dir_mask = out_dir / mask_dir
-        Path.mkdir(out_dir_mask, exist_ok=True)
-        name_root = gpkg.stem
-        img_3x_dir = out_dir.glob("*images_masked_3x")
-        for image_path in img_3x_dir:
-            output_path_mask = out_dir_mask / f"{image_path.name}_3x.tif"
-            if debug:
-                make_geojsons_and_masks(name_root, image_path, gpkg, output_path_mask, layer='Table1')
-            elif not output_path_mask.is_file():
-                input_args.append([make_geojsons_and_masks, name_root, image_path, gpkg, output_path_mask])
 
     print("len input_args", len(input_args))
     print("Execute...\n")
@@ -338,11 +325,13 @@ def create_label(data_json, out_dir, f3x=True, debug=False):
             pool.map(map_wrapper, input_args)
 
 
-def create_trainval_list(root):
+def create_trainval_list(data_json, out_dir):
     """
     Create train list and validation list.
     Aois in val_aois below are chosen to validation aois.
     """
+    root = data_json.parent.parent
+
     val_aois = set(["L15-0387E-1276N_1549_3087_13",
                     "L15-1276E-1107N_5105_3761_13",
                     "L15-1015E-1062N_4061_3941_13",
