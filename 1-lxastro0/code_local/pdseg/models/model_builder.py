@@ -15,6 +15,7 @@
 
 import struct
 
+import paddle
 import paddle.fluid as fluid
 import numpy as np
 from paddle.fluid.proto.framework_pb2 import VarType
@@ -28,6 +29,9 @@ from lovasz_losses import lovasz_hinge
 from lovasz_losses import lovasz_softmax
 from models.modeling import deeplab, unet, icnet, pspnet, hrnet, fast_scnn
 from models.libs.model_libs import fuse
+
+if int(paddle.__version__.split(".")[0]) >= 2:
+    paddle.enable_static()
 
 
 class ModelPhase(object):

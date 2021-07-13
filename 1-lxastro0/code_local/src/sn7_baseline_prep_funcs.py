@@ -26,7 +26,7 @@ def map_wrapper(x):
 
 
 def make_geojsons_and_masks(name_root, image_path, json_path, 
-                            output_path_mask, layer=None, output_path_mask_fbc=None):
+                            output_path_mask, output_path_mask_fbc=None):
     '''
     Make the stuffins
     mask_fbc is an (optional) three-channel fbc (footbrint, boundary, contact) mask
@@ -35,7 +35,7 @@ def make_geojsons_and_masks(name_root, image_path, json_path,
     print("  name_root:", name_root)
 
     # filter out null geoms (this is always a worthy check)
-    gdf_tmp = _check_gdf_load(json_path, layer=layer)
+    gdf_tmp = _check_gdf_load(json_path)
     if len(gdf_tmp) == 0:
         gdf_nonull = gdf_tmp
     else:

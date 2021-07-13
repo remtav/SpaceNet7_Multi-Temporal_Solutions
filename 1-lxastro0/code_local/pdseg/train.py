@@ -163,7 +163,8 @@ def save_infer_program(test_program, ckpt_dir):
     _test_program = test_program.clone()
     _test_program.desc.flush()
     _test_program.desc._set_version()
-    paddle.fluid.core.save_op_compatible_info(_test_program.desc)
+    if int(paddle.__version__.split(".")[0]) < 2:
+        paddle.fluid.core.save_op_compatible_info(_test_program.desc)
     with open(os.path.join(ckpt_dir, 'model') + ".pdmodel", "wb") as f:
         f.write(_test_program.desc.serialize_to_string())
 
@@ -276,6 +277,7 @@ def train(cfg):
     # Resume training
     begin_epoch = cfg.SOLVER.BEGIN_EPOCH
     if cfg.TRAIN.RESUME_MODEL_DIR:
+        print(f"Loading checkpoint from {cfg.TRAIN.RESUME_MODEL_DIR}")
         begin_epoch = load_checkpoint(exe, train_prog)
     # Load pretrained model
     elif os.path.exists(cfg.TRAIN.PRETRAINED_MODEL_DIR):
@@ -327,6 +329,7 @@ def train(cfg):
 
     for epoch in range(begin_epoch, cfg.SOLVER.NUM_EPOCHS + 1):
         data_loader.start()
+        #if exe is not None:
         while True:
             try:
                 if args.debug:
@@ -395,12 +398,13 @@ def train(cfg):
                     elif args.is_profiler and epoch == 1 and step == args.log_steps + 5:
                         profiler.stop_profiler("total", args.profiler_path)
                         return
-
             except fluid.core.EOFException:
                 data_loader.reset()
                 break
             except Exception as e:
                 print(e)
+        #else:
+            #print(f"\nexe: {exe}, resume: {cfg.TRAIN.RESUME_MODEL_DIR}\n")
 
         if (epoch % cfg.TRAIN.SNAPSHOT_EPOCH == 0
                 or epoch == cfg.SOLVER.NUM_EPOCHS) and cfg.TRAINER_ID == 0:

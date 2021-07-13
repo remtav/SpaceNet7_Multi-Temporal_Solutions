@@ -13,6 +13,6 @@ cd pretrained_model
 python download_model.py hrnet_w48_bn_imagenet
 cd ..
 
-python pdseg/train.py --do_eval --use_gpu --cfg hrnet_sn7.yaml DATASET.DATA_DIR /wdata/train DATASET.TEST_FILE_LIST val_list.txt
+python pdseg/train.py --do_eval --use_gpu --cfg hrnet_sn7.yaml DATASET.DATA_DIR ../../../data_gdl DATASET.TEST_FILE_LIST val_list.txt
 
 

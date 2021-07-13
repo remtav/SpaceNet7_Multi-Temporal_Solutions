@@ -231,7 +231,8 @@ class SegDataset(object):
                             " image_name{}label_name\\n".format(cfg.DATASET.SEPARATOR))
 
         # read input image 1
-        img1_path = os.path.join(src_dir, img1_name)
+        #img1_path = os.path.join(src_dir, img1_name)
+        img1_path = img1_name
         img1 = cv2_imread(img1_path, cv2_imread_flag)
         if img1 is None:
             raise Exception(
@@ -241,7 +242,8 @@ class SegDataset(object):
 
         # read input image 2
         if img2_name is not None:
-            img2_path = os.path.join(src_dir, img2_name)
+            #img2_path = os.path.join(src_dir, img2_name)
+            img2_path = img2_name
             img2 = cv2_imread(img2_path, cv2_imread_flag)
             if img2 is None:
                 raise Exception(

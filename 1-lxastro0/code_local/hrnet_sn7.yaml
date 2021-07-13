@@ -1,6 +1,6 @@
 # 数据集配置
 DATASET:
-    DATA_DIR: "/data/SN7_buildings/train/"
+    DATA_DIR: "../../../data_gdl"
     NUM_CLASSES: 2
     TEST_FILE_LIST: "test_list.txt"
     TRAIN_FILE_LIST: "train_list.txt"
@@ -20,22 +20,23 @@ MODEL:
             NUM_CHANNELS: [48, 96, 192, 384]
 
 # 其他配置
-TRAIN_CROP_SIZE: (256, 256)
-EVAL_CROP_SIZE: (256, 256)
+TRAIN_CROP_SIZE: (512, 512)
+EVAL_CROP_SIZE: (2048, 2048)
 AUG:
     AUG_METHOD: "rangescaling"
-    FIX_RESIZE_SIZE: (256, 256)
-    INF_RESIZE_VALUE: 256
-    MAX_RESIZE_VALUE: 300
-    MIN_RESIZE_VALUE: 200
+    FIX_RESIZE_SIZE: (512, 512)
+    INF_RESIZE_VALUE: 512
+    MAX_RESIZE_VALUE: 600
+    MIN_RESIZE_VALUE: 450
     MIRROR: True
 BATCH_SIZE: 2
 TRAIN:
+    RESUME_MODEL_DIR: None
     PRETRAINED_MODEL_DIR: "./pretrained_model/hrnet_w48_bn_imagenet/"
-    MODEL_SAVE_DIR: "/wdata/saved_model/hrnet/"
+    MODEL_SAVE_DIR: "saved_model/hrnet/"
     SNAPSHOT_EPOCH: 1 
 TEST:
-    TEST_MODEL: "/wdata/saved_model/hrnet/best_model/"
+    TEST_MODEL: "saved_model/hrnet/best_model/"
     TEST_AUG: False                                                                                      
     TEST_AUG_FLIP_OPS: ['v']                                                                              
     TEST_AUG_ROTATE_OPS: [] 

@@ -13,7 +13,8 @@ rm /wdata/test/*
 python tools.py /wdata/test test
 cp dummy.tif /wdata/test
 
-python pdseg/eval.py --use_gpu --vis --vis_dir vis/test_org --cfg hrnet_sn7.yaml DATASET.DATA_DIR /wdata/test DATASET.VAL_FILE_LIST test_list.txt VIS.VISINEVAL True TEST.TEST_AUG True
+python pdseg/eval.py --use_gpu --vis --vis_dir vis/test_org --cfg hrnet_sn7.yaml DATASET.DATA_DIR /media/data/buildings/spacenet/data_gdl DATASET.VAL_FILE_LIST test_list.txt VIS.VISINEVAL True TEST.TEST_AUG True
+
 
 python tools.py vis/test_org compose
 
