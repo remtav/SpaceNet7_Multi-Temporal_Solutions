@@ -24,10 +24,10 @@ TRAIN_CROP_SIZE: (512, 512)
 EVAL_CROP_SIZE: (2048, 2048)
 AUG:
     AUG_METHOD: "rangescaling"
-    FIX_RESIZE_SIZE: (512, 512)
-    INF_RESIZE_VALUE: 512
-    MAX_RESIZE_VALUE: 600
-    MIN_RESIZE_VALUE: 450
+    FIX_RESIZE_SIZE: (2048, 2048)
+    INF_RESIZE_VALUE: 2048
+    MAX_RESIZE_VALUE: 3072
+    MIN_RESIZE_VALUE: 1024
     MIRROR: True
 BATCH_SIZE: 2
 TRAIN:
@@ -37,7 +37,7 @@ TRAIN:
     SNAPSHOT_EPOCH: 1 
 TEST:
     TEST_MODEL: "saved_model/hrnet/best_model/"
-    TEST_AUG: False                                                                                      
+    TEST_AUG: False
     TEST_AUG_FLIP_OPS: ['v']                                                                              
     TEST_AUG_ROTATE_OPS: [] 
 SOLVER:
@@ -50,3 +50,4 @@ SOLVER:
 VIS:
     ADD_LABEL: False
     RAW_PRED: True
+    VISINEVAL: True

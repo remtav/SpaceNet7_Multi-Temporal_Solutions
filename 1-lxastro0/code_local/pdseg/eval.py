@@ -19,6 +19,9 @@ from __future__ import print_function
 
 import os
 # GPU memory garbage collection optimization flags
+from PIL import Image
+from pathlib import Path
+
 os.environ['FLAGS_eager_delete_tensor_gb'] = "0.0"
 
 import sys
@@ -76,7 +79,8 @@ def parse_args():
     return parser.parse_args()
 
 
-def evaluate(cfg, ckpt_dir=None, use_gpu=False, vis=False, vis_dir='vis_out/test_public', use_mpio=False, **kwargs):
+def evaluate(cfg, ckpt_dir=None, use_gpu=False, vis=False, vis_dir='vis_out/test_public', use_mpio=False, debug=False,
+             **kwargs):
     np.set_printoptions(precision=5, suppress=True)
 
     startup_prog = fluid.Program()
@@ -162,7 +166,19 @@ def evaluate(cfg, ckpt_dir=None, use_gpu=False, vis=False, vis_dir='vis_out/test
                     if cnt > len(fls): continue
                     name = fls[cnt].split('/')[-1].split('.')[0]
                     p = np.squeeze(preds[j])
-                    np.save(os.path.join(vis_dir, name + '.npy'), p)
+                    if debug:
+                        patch = (p * 255).astype(np.uint8)
+                        print(p.max())
+                        print(p.min())
+                        print(p.mean())
+                        print(patch.max())
+                        print(patch.min())
+                        # print(np.where(patch==254))
+                        im = Image.fromarray(patch)
+                        im.save(os.path.join(vis_dir, name + '.png'))
+                    else:
+                        np.save(os.path.join(vis_dir, name + '.npy'), p)
+
                     cnt += 1
                 print('vis %d npy... (%d tif sample)' % (cnt, cnt//36))
                 continue
@@ -212,4 +228,7 @@ def main():
 
 
 if __name__ == '__main__':
+    # print(os.environ['LD_LIBRARY_PATH'])
+    # print(os.environ['PATH'])
+    # print(list(Path(os.environ['LD_LIBRARY_PATH']).glob("*cudnn*")))
     main()

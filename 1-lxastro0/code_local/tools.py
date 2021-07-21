@@ -17,8 +17,8 @@ if mode == "train":
     #dlib.create_trainval_list(data_json, out_dir)
     pass
 elif mode == "test":
-    #dlib.enlarge_3x(data_json, out_dir)
-    #dlib.divide(data_json, out_dir)
+    dlib.enlarge_3x(data_json, out_dir)
+    dlib.divide(data_json, out_dir)
     dlib.create_test_list(data_json, out_dir)
 else:
-    dlib.compose(data_json)
+    dlib.compose(data_json, out_dir)

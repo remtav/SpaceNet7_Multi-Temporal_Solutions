@@ -42,8 +42,10 @@ def pil_imread(file_path):
     return np.asarray(im)
 
 
-def cv2_imread(file_path, flag=cv2.IMREAD_COLOR):
+def cv2_imread(file_path, flag=cv2.IMREAD_COLOR, debug=True):
     # resolve cv2.imread open Chinese file path issues on Windows Platform.
+    if debug:
+        print(file_path)
     return cv2.imdecode(np.fromfile(file_path, dtype=np.uint8), flag)
 
 

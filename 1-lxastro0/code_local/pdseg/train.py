@@ -427,7 +427,7 @@ def train(cfg):
                     update_best_model(ckpt_dir)
                     print_info("Save best model {} to {}, mIoU = {:.4f}".format(
                         ckpt_dir,
-                        os.path.join(cfg.TRAIN.MODEL_SAVE_DIR, 'best_model'),
+                        os.path.join(cfg.TRAIN.MODEL_SAVE_DIR, 'best_model_JUL13'),
                         mean_iou))
 
             # Use VisualDL to visualize results

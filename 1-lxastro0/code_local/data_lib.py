@@ -86,25 +86,84 @@ def compose_img(divide_img_ls, compose_img_dir, ext=".png"):
     image.save(os.path.join(compose_img_dir, file_name + ext))
 
 
-def compose_arr(divide_img_ls, compose_img_dir, ext=".npy"):
+def compose_arr(divide_img_ls, data_json):
     """
     Core function of putting results into one.
     """
     im_list = sorted(divide_img_ls)
 
-    last_file = os.path.split(im_list[-1])[-1]
-    file_name = '_'.join(last_file.split('.')[0].split('_')[:-2])
-    yy, xx = last_file.split('.')[0].split('_')[-2:]
-    rows = int(yy) // height_stride + 1
-    cols = int(xx) // width_stride + 1
+    root = data_json.parent.parent
+    with open(data_json, 'r') as fin:
+        dict_data = json.load(fin)
+    prep_imgs = [x['R_band'] for x in dict_data['all_images']]
 
-    image = np.zeros((cols * target_width, rows * target_height), dtype=np.float32) * 255
-    for y in range(rows):
-        for x in range(cols):
-            patch = np.load(im_list[cols * y + x])
-            image[y * target_height: (y + 1) * target_height, x * target_width: (x + 1) * target_width] = patch
+    # ex.: BC6P002_3x_26624_12288
+    first_file_splitted = str(im_list[0].stem).split('_')
+    aoi_id = first_file_splitted[0]  # ex.: BC6P002
+    src_img_match = [rband for rband in prep_imgs if f'{aoi_id}_' in rband]
+    if len(src_img_match) == 1:
+        print(f'Found source image: {src_img_match}')
+    elif len(src_img_match) > 1:
+        print(f'Found too many source images: {src_img_match}')
+        src_img_match = []
 
-    np.save(os.path.join(compose_img_dir, file_name + ext), image)
+    yys = [int(str(file.stem).split('_')[-2]) for file in im_list]
+    xxs = [int(str(file.stem).split('_')[-1]) for file in im_list]
+    yy0, xx0 = min(yys), min(xxs)
+    yy1, xx1 = max(yys), max(xxs)
+    suffix = '.tif' if src_img_match else '.png'
+    file_name = im_list[0].parent.parent / f"{im_list[0].parent.stem}_compose" / \
+                f"{aoi_id}_{first_file_splitted[1]}{suffix}"
+    if file_name.is_file():
+        print(f'Output file exists: {file_name}')
+        return
+    # we determine the size of the final composed image
+    yy, xx = int(yy1)-int(yy0), int(xx1)-int(xx0)
+    rows = yy // height_stride + 1
+    cols = xx // width_stride + 1
+
+    # create empty image that will be filled by patches
+    pred = np.zeros((1, rows * target_height, cols * target_width), dtype=np.uint8) * 255
+    for img in im_list:
+        patch = (np.load(img)*255).astype(np.uint8)
+        y0 = int(str(img.stem).split('_')[-2]) - yy0
+        y1 = y0 + target_height
+        x0 = int(str(img.stem).split('_')[-1]) - xx0
+        x1 = x0 + target_width
+        try:
+            pred[0, y0: y1, x0: x1] = patch
+        except ValueError as e:
+            raise(e)
+
+    buffered_col_start = np.where((pred == 254).all(axis=1))[1].min()
+    buffered_row_start = np.where((pred == 254).all(axis=2))[1].min()
+    pred = pred[:, :buffered_row_start, :buffered_col_start]
+
+    if src_img_match and (root / src_img_match[0]).is_file():
+        src_img = root / src_img_match[0]
+        with rasterio.open(src_img, 'r') as raster:
+            # scale image transform
+            transform = raster.transform * raster.transform.scale(
+                (raster.width / pred.shape[-1]),
+                (raster.height / pred.shape[-2])
+            )
+            inf_meta = raster.meta
+            inf_meta.update({"driver": "GTiff",
+                             "height": pred.shape[-2],
+                             "width": pred.shape[-1],
+                             "count": pred.shape[0],
+                             "dtype": 'uint8',
+                             "transform": transform,
+                             "compress": 'lzw'})
+            print(f'Successfully inferred on {src_img}\nWriting to file: {file_name}')
+            with rasterio.open(file_name, 'w+', **inf_meta) as dest:
+                dest.write(pred)
+                return
+
+    else:
+        # defaults to non-georeferenced png
+        im = Image.fromarray(pred[0, :, :])
+        im.save(file_name)
 
 
 def divide_img(img_file, save_dir='divide_imgs', inter_type=cv2.INTER_LINEAR, debug=False):
@@ -222,28 +281,27 @@ def divide(data_json, out_dir, f3x=True):
         pool.map(map_wrapper, input_args)
 
 
-def compose(root):
+def compose(data_json, out_dir):
     """
     Because the images are cut into small parts, the output results are also small parts.
     We need to put the output results into a large one.
     """
-    if isinstance(root, Path):
-        root = str(root)
-    dst = root + "_compose"
-    if not os.path.exists(dst):
-        os.makedirs(dst)
+    if isinstance(out_dir, str):
+        out_dir = Path(out_dir)
+    dst = out_dir.parent / f"{out_dir.name}_compose"
+    dst.mkdir(exist_ok=True)
     dic = {}
-    img_files = [os.path.join(root, x) for x in os.listdir(root)]
+    img_files = [x for x in out_dir.glob('*.npy')] #iterdir()]
     for img_file in img_files:
-        key = '_'.join(img_file.split('/')[-1].split('_')[2:9])
+        key = str(img_file.stem).split('_3x')[0]
         if key not in dic:
             dic[key] = [img_file]
         else:
-            dic[key].append(img_file)
+             dic[key].append(img_file)
 
     for k, v in dic.items():
         print(k)
-        compose_arr(v, dst)
+        compose_arr(v, data_json)
 
 
 def enlarge_3x(data_json, out_dir):
@@ -267,7 +325,7 @@ def enlarge_3x(data_json, out_dir):
         print("enlarge 3x:", aoi)
         gpkg = list(aoi['gpkg'].values())
         gpkg = root/f"{gpkg[0]}" if len(gpkg)==1 else None
-        print(f"l307: {gpkg}")
+        print(f"gpkg: {gpkg}")
         if not gpkg or not (gpkg).is_file():
         	warnings.warn(f"Geopackage file not found: {aoi}")
         	continue
@@ -459,6 +517,7 @@ def create_test_list(data_json, out_dir, debug=False):
                 'Moncton1', 'ON10P001', 'ON10P002', 'ON3', 'ON7', 'ON8', 'QC10P001', 'QC19', 'QC22', 'QC28', 'SK6'}
     fw = "test_list.txt"
     for tif in (Path(out_dir)/"images_masked_3x_divide").iterdir():
+    #for tif in (Path(out_dir) / "images_masked_3x_divide").glob('*BC*'):
         if debug:
             write_test(tif, tst_aois, fw)
         else:
@@ -475,5 +534,5 @@ def write_test(tif, tst_aois, fw):
     fw = open(fw, 'a')
     if str(tif.stem).split("_")[0] in tst_aois:
         print(f"writing to test list: {tif}")
-        fw.write(str(tif.resolve()) + ' ' + " dummy.tif\n")
+        fw.write(str(tif.resolve()) + ' ' + "dummy.tif\n")
     fw.close()
