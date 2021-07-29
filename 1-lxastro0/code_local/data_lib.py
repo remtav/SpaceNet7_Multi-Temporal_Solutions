@@ -5,11 +5,11 @@ import multiprocessing
 import warnings
 
 from pathlib import Path
+from typing import Union, List
+from fiona.errors import DriverError
 
 warnings.filterwarnings('ignore')
 
-import pandas as pd
-import skimage
 try:
     import gdal
 except ImportError:
@@ -18,6 +18,7 @@ import numpy as np
 import cv2
 from PIL import Image
 import rasterio
+import geopandas as gpd
 
 Image.MAX_IMAGE_PIXELS = None
 
@@ -339,7 +340,7 @@ def enlarge_3x(data_json, out_dir):
         if not out_img.is_file():
             input_args.append([enlarge_3x_save, root, aoi, out_img])
         else:
-        	print(f"There's a problem here. {out_img} exists? {out_img.is_file()}. Img: {img.shape}, height: {height}, Img: {width}")
+        	print(f"There's a problem here. {out_img} exists? {out_img.is_file()}. Img shape: {out_img.shape}")
 
     print("len input_args", len(input_args))
     print("Execute...\n")
@@ -536,3 +537,116 @@ def write_test(tif, tst_aois, fw):
         print(f"writing to test list: {tif}")
         fw.write(str(tif.resolve()) + ' ' + "dummy.tif\n")
     fw.close()
+
+def check_data(data_json, out_dir, f3x=True, before_prep_only=False, verbose=True):
+    root = data_json.parent.parent
+    with open(data_json, 'r') as fin:
+        dict_data = json.load(fin)
+
+    valid_aois = []
+    invalid_aois = []
+    for i, aoi in enumerate(dict_data["all_images"]):
+        print(i, "Checking aoi:", aoi['id'])
+        is_valid = True
+        aoi['errors'] = []
+
+        if not aoi['id']:
+            id_not_err = f'Invalid id: {aoi["id"]}'
+            is_valid = error_handler(aoi['errors'], id_not_err, verbose=verbose)
+        src_prep_rasters = {key: val for key, val in aoi.items() if "_band" in key and len(key) == 6}
+        for file in src_prep_rasters.values():
+            file = root/file
+            if not file.is_file():
+                raster_not_err = f'Raster file not found: {file}'
+                is_valid = error_handler(aoi['errors'], raster_not_err, verbose=verbose)
+            elif not validate_gdal_raster(file, verbose=verbose):
+                raster_inv_err = f'Invalid raster file: {file}'
+                is_valid = error_handler(aoi['errors'], raster_inv_err, verbose=verbose)
+
+        gpkgs = list(aoi['gpkg'].values())
+        if not gpkgs:
+            gpkg_miss_err = f"Geopackage path not found in json: {gpkgs}"
+            is_valid = error_handler(aoi['errors'], gpkg_not_err, verbose=verbose)
+        elif len(gpkgs) > 1:
+            gpkg_over_err = f"Too many geopackage files: {gpkgs}"
+            is_valid = error_handler(aoi['errors'], gpkg_over_err, verbose=verbose)
+        else:
+            gpkg = root/f"{gpkgs[0]}"
+            if gpkg.is_file():
+                try:
+                    gdf = gpd.read_file(gpkg)
+                    if verbose:
+                        print(gdf)
+                except DriverError as e:
+                    gpkg_inv_err = f"Invalid geopackage file: {gpkg}"
+                    is_valid = error_handler(aoi['errors'], gpkg_inv_err, verbose=verbose)
+                except Exception as e:
+                    gpkg_unkwn_err = f"Unknown error reading geopackage file: {gpkg}"
+                    is_valid = error_handler(aoi['errors'], gpkg_unkwn_err, verbose=verbose)
+            else:
+                gpkg_not_err = f"Geopackage not a file: {gpkg}"
+                is_valid = error_handler(aoi['errors'], gpkg_not_err, verbose=verbose)
+
+        if not before_prep_only:
+            if f3x:
+                image_path = out_dir / "images_masked_3x" / f'{aoi["id"]}_3x.tif'
+                gt_path = out_dir / "masks_3x" / f'{aoi["id"]}_3x_gt.tif'
+            else:
+                image_path = out_dir / "images_masked" / f'{aoi["id"]}.tif'
+                gt_path = out_dir / "masks_3x" / f'{aoi["id"]}_3x_gt.tif'
+            dst_prep_rasters = [image_path, gt_path]
+            for file in dst_prep_rasters:
+                if not file.is_file():
+                    dst_not_err = f"Training raster not found: {file}"
+                    is_valid = error_handler(aoi['errors'], dst_not_err, verbose=verbose)
+                else:
+                    valid_raster, metadata = validate_gdal_raster(file)
+                    if not valid_raster:
+                        dst_inv_err = f"Training raster invalid: {file}"
+                        is_valid = error_handler(aoi['errors'], dst_inv_err, verbose=verbose)
+                    else:
+                        tiles_x = 1 + int(round((metadata['width']-target_width) / width_stride))
+                        tiles_y = 1 + int(round((metadata['height']-target_height) / height_stride))
+                        nb_exp_tiles = tiles_x * tiles_y
+                        img_tiles_dir = image_path.parent.parent / f'{image_path.parent}_divide'
+                        nb_act_img_tiles = len(list(img_tiles_dir.glob(f'{image_path.stem}*.tif')))
+                        gt_tiles_dir = gt_path.parent.parent / f'{gt_path.parent}_divide'
+                        nb_act_gt_tiles = len(list(gt_tiles_dir.glob(f'{gt_path.stem}*.tif')))
+                        if not nb_act_img_tiles == nb_exp_tiles:
+                            ras_tiles_err = f"Number of expected raster tiles {nb_exp_tiles} doesn't match number of actual tiles {nb_act_img_tiles}"
+                            is_valid = error_handler(aoi['errors'], ras_tiles_err, verbose=verbose)
+                        if not nb_act_gt_tiles == nb_exp_tiles:
+                            gt_tiles_err = f"Number of expected raster tiles {nb_exp_tiles} doesn't match number of actual tiles {nb_act_gt_tiles}"
+                            is_valid = error_handler(aoi['errors'], gt_tiles_err, verbose=verbose)
+
+        if not is_valid:
+            invalid_aois.append(aoi)
+        else:
+            valid_aois.append(aoi)
+
+    return valid_aois, invalid_aois
+
+
+def validate_gdal_raster(geo_image: Union[str, Path], verbose: bool = True):
+    if not geo_image:
+        return False
+    geo_image = Path(geo_image) if isinstance(geo_image, str) else geo_image
+    try:
+        with rasterio.open(geo_image, 'r') as raster:
+            metadata = raster.meta
+        return True, metadata
+    except rasterio.errors.RasterioIOError as e:
+        metadata = ''
+        if verbose:
+            print(e)
+        return False, metadata
+
+
+def error_handler(err_list: List, err_msg: str, verbose=True):
+    if not err_msg:
+        return True
+    else:
+        err_list.append(err_msg)
+        if verbose:
+            print(err_msg)
+        return False
