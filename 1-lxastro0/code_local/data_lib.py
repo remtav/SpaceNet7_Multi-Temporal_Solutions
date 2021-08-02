@@ -566,7 +566,7 @@ def check_data(data_json, out_dir, f3x=True, before_prep_only=False, verbose=Tru
         gpkgs = list(aoi['gpkg'].values())
         if not gpkgs:
             gpkg_miss_err = f"Geopackage path not found in json: {gpkgs}"
-            is_valid = error_handler(aoi['errors'], gpkg_not_err, verbose=verbose)
+            is_valid = error_handler(aoi['errors'], gpkg_miss_err, verbose=verbose)
         elif len(gpkgs) > 1:
             gpkg_over_err = f"Too many geopackage files: {gpkgs}"
             is_valid = error_handler(aoi['errors'], gpkg_over_err, verbose=verbose)
