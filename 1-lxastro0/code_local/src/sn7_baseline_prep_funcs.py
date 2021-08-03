@@ -26,7 +26,7 @@ def map_wrapper(x):
 
 
 def make_geojsons_and_masks(name_root, image_path, json_path, 
-                            output_path_mask, output_path_mask_fbc=None):
+                            output_path_mask, burn_val=4, output_path_mask_fbc=None):
     '''
     Make the stuffins
     mask_fbc is an (optional) three-channel fbc (footbrint, boundary, contact) mask
@@ -66,7 +66,7 @@ def make_geojsons_and_masks(name_root, image_path, json_path,
         
     # make masks (single channel)
     # https://github.com/CosmiQ/solaris/blob/master/docs/tutorials/notebooks/api_masks_tutorial.ipynb
-    is_buildings = gdf_nonull.Quatreclasses.isin([4, '4'])
+    is_buildings = gdf_nonull.Quatreclasses.isin([burn_val, str(burn_val)])
     if not is_buildings.any():
         warnings.warn(f"No feature found in {name_root}")
     gdf_nonull = gdf_nonull[is_buildings]

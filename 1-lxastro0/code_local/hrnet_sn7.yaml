@@ -29,20 +29,20 @@ AUG:
     MAX_RESIZE_VALUE: 3072
     MIN_RESIZE_VALUE: 1024
     MIRROR: True
-BATCH_SIZE: 2
+BATCH_SIZE: 6
 TRAIN:
     RESUME_MODEL_DIR: None
-    PRETRAINED_MODEL_DIR: "./pretrained_model/hrnet_w48_bn_imagenet/"
+    PRETRAINED_MODEL_DIR: "./pretrained_model/lxastro/"
     MODEL_SAVE_DIR: "saved_model/hrnet/"
     SNAPSHOT_EPOCH: 1 
 TEST:
     TEST_MODEL: "saved_model/hrnet/best_model/"
-    TEST_AUG: False
+    TEST_AUG: False                                                                                      
     TEST_AUG_FLIP_OPS: ['v']                                                                              
     TEST_AUG_ROTATE_OPS: [] 
 SOLVER:
     NUM_EPOCHS: 70
-    LR: 0.01
+    LR: 0.001
     LR_POLICY: "piecewise"                                                                                
     DECAY_EPOCH: [40, 60]                                                                                 
     GAMMA: 0.1 
@@ -50,4 +50,3 @@ SOLVER:
 VIS:
     ADD_LABEL: False
     RAW_PRED: True
-    VISINEVAL: True

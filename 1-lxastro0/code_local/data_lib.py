@@ -3,6 +3,8 @@ import os
 import sys
 import multiprocessing
 import warnings
+import math
+import csv
 
 from pathlib import Path
 from typing import Union, List
@@ -96,7 +98,7 @@ def compose_arr(divide_img_ls, data_json):
     root = data_json.parent.parent
     with open(data_json, 'r') as fin:
         dict_data = json.load(fin)
-    prep_imgs = [x['R_band'] for x in dict_data['all_images']]
+    prep_imgs = [vals['R_band'] for (aoi_id, vals) in dict_data['all_images'][0].items()]
 
     # ex.: BC6P002_3x_26624_12288
     first_file_splitted = str(im_list[0].stem).split('_')
@@ -179,6 +181,7 @@ def divide_img(img_file, save_dir='divide_imgs', inter_type=cv2.INTER_LINEAR, de
         with rasterio.open(img_file, 'r') as raster:
             img = raster.read()
             img = np.moveaxis(img, 0, -1)
+            img = img.astype('uint8')
     except Exception as e: 
         print(f"rasterio can't open: {img_file}\n{e}")
         return
@@ -210,38 +213,35 @@ def divide_img(img_file, save_dir='divide_imgs', inter_type=cv2.INTER_LINEAR, de
                     img_crop = cv2.copyMakeBorder(img_crop, 0, pad_bottom, 0, pad_right,
                                                   cv2.BORDER_CONSTANT, value=padding_pixel)
                 Image.fromarray(img_crop).save(save_file)
+            else:
+                print(f'{save_file} exists')
             x1 += width_stride
             idx += 1
         x1 = 0
         y1 += height_stride
 
 
-def divide(data_json, out_dir, f3x=True):
+def divide(data_json, out_dir, f3x=True, debug=False):
     """
     Considering the training speed, we divide the image into small images.
     """
     root = data_json.parent.parent
-
     with open(data_json, 'r') as fin:
         dict_data = json.load(fin)
 
     n_threads = 16
     input_args = []
-    for i, aoi in enumerate(dict_data["all_images"]):
-        print(i, "aoi:", aoi)
-        gpkg = root/f"{list(aoi['gpkg'].values())}"
-        if not gpkg or not (gpkg).is_file():
-            warnings.warn(f"Geopackage file not found: {aoi}")
-            continue
-        im_dir = (root/aoi["R_band"]).parent
-        if f3x:
-            img_3x_dir = out_dir/"images_masked_3x"
-            image_path = list(img_3x_dir.glob('*3x.tif'))[0]
+
+    for i, (aoi_id, vals) in enumerate(dict_data["all_images"][0].items()):
+        print("divide:", aoi_id)
+        if not 'gpkg' in vals.keys():
+            warnings.warn(f"Geopackage file not found: {aoi_id}")
         else:
-            image_path = root/aoi["R_band"]
-        if not image_path.parent.is_dir():
-            warnings.warn(f"Image directory not found: {str(image_path)}")
-            continue
+            gpkg = vals['gpkg']
+            gpkg = root/f"{gpkg}" if gpkg else None
+            print(f"gpkg: {gpkg}")
+            if not gpkg or not (gpkg).is_file():
+                warnings.warn(f"Geopackage file not found: {aoi_id}")
 
     assert f3x
     img_3x_dir = out_dir / "images_masked_3x"
@@ -250,10 +250,26 @@ def divide(data_json, out_dir, f3x=True):
         print(i, "aoi:", image_path)
         if image_path.is_file():
             try:
-            	out_dir_full = out_dir/f"images_masked_3x_divide"
-            	input_args.append([divide_img, str(image_path.resolve()), out_dir_full])
-            except:
-                warnings.warn(f"image path: {image_path}")	
+                valid_raster, metadata = validate_gdal_raster(image_path)
+                tiles_x = 1 + math.ceil((metadata['width']-target_width) / width_stride)
+                tiles_y = 1 + math.ceil((metadata['height']-target_height) / height_stride)
+                nb_exp_tiles = tiles_x * tiles_y
+                img_tiles_dir = Path(f'{image_path.parent}_divide')
+                nb_act_img_tiles = len(list(img_tiles_dir.glob(f'{image_path.stem.split("_")[0]}_*.tif')))
+                if not nb_act_img_tiles == nb_exp_tiles:
+                    print(img_tiles_dir)
+                    print(nb_act_img_tiles)
+                    print(nb_exp_tiles)
+                    out_dir_full = out_dir/f"images_masked_3x_divide"
+                    if debug and not 'SK11' in str(image_path):
+                        print(f"Will divide {image_path}")
+                        divide_img(str(image_path.resolve()), out_dir_full)
+                    elif not 'SK11' in str(image_path):
+                        input_args.append([divide_img, str(image_path.resolve()), out_dir_full])
+                else:
+                    print(f'Image already divided: {image_path}')
+            except Exception as e:
+                print(e)
         else:
             warnings.warn(f"image path: {image_path}")
 
@@ -267,13 +283,28 @@ def divide(data_json, out_dir, f3x=True):
     grt_paths = grt_3x_dir.glob('*3x_gt.tif')
     for grt_path in grt_paths:
         if grt_path.is_file():
-            try:
-            	out_dir_full = out_dir/f"masks_3x_divide"
-            	input_args.append([divide_img, str(grt_path.resolve()), out_dir_full, cv2.INTER_NEAREST])
-            except:
-                warnings.warn(f"image path: {image_path}")	
+            valid_raster, metadata = validate_gdal_raster(grt_path)
+            tiles_x = 1 + math.ceil((metadata['width']-target_width) / width_stride)
+            tiles_y = 1 + math.ceil((metadata['height']-target_height) / height_stride)
+            nb_exp_tiles = tiles_x * tiles_y
+            gt_tiles_dir = Path(f'{grt_path.parent}_divide')
+            nb_act_gt_tiles = len(list(gt_tiles_dir.glob(f'{grt_path.stem.split("_")[0]}_*.tif')))
+            if not nb_act_gt_tiles == nb_exp_tiles:
+                print(f'{grt_path.stem.split("_")[0]}_*.tif')
+                print(gt_tiles_dir)
+                print(nb_act_gt_tiles)
+                print(nb_exp_tiles)
+                print(f"Will divide {grt_path}")
+                try:
+                    out_dir_full = out_dir/f"masks_3x_divide"
+                    if debug:
+                        divide_img(str(grt_path.resolve()), out_dir_full, cv2.INTER_NEAREST)
+                    else:
+                        input_args.append([divide_img, str(grt_path.resolve()), out_dir_full, cv2.INTER_NEAREST])
+                except Exception as e:
+                    print(e)
         else:
-            warnings.warn(f"image path: {image_path}")
+            warnings.warn(f"image path: {grt_path}")
 
     print("len input_args", len(input_args))
     print("Execute...\n")
@@ -300,12 +331,13 @@ def compose(data_json, out_dir):
         else:
              dic[key].append(img_file)
 
+    print(dic.keys())
     for k, v in dic.items():
         print(k)
         compose_arr(v, data_json)
 
 
-def enlarge_3x(data_json, out_dir):
+def enlarge_3x(data_json, out_dir, debug=False):
     """
     Enlarge the original images by 3 times.
     """
@@ -322,15 +354,17 @@ def enlarge_3x(data_json, out_dir):
     #         warnings.warn(f"Image directory not found: {str((root/aoi['R_band']).parent)}")
     #         continue
 
-    for i, aoi in enumerate(dict_data["all_images"]):
-        print("enlarge 3x:", aoi)
-        gpkg = list(aoi['gpkg'].values())
-        gpkg = root/f"{gpkg[0]}" if len(gpkg)==1 else None
-        print(f"gpkg: {gpkg}")
-        if not gpkg or not (gpkg).is_file():
-        	warnings.warn(f"Geopackage file not found: {aoi}")
-        	continue
-        img_file = root/aoi["R_band"]
+    for i, (aoi_id, vals) in enumerate(dict_data["all_images"][0].items()):
+        print("enlarge 3x:", aoi_id)
+        if not 'gpkg' in vals.keys():
+            warnings.warn(f"Geopackage file not found: {aoi_id}")
+        else:
+            gpkg = vals['gpkg']
+            gpkg = root/f"{gpkg}" if gpkg else None
+            print(f"gpkg: {gpkg}")
+            if not gpkg or not (gpkg).is_file():
+                warnings.warn(f"Geopackage file not found: {aoi_id}")
+        img_file = Path(vals["R_band"])
         out_dir_mask = out_dir / 'images_masked_3x'
         out_img = out_dir_mask / f"{str(img_file.name).split('_')[0]}_3x.tif"
         Path.mkdir(out_dir_mask, exist_ok=True)
@@ -338,9 +372,12 @@ def enlarge_3x(data_json, out_dir):
             continue
 
         if not out_img.is_file():
-            input_args.append([enlarge_3x_save, root, aoi, out_img])
+            if debug:
+                enlarge_3x_save(root, vals, out_img)
+            else:
+                input_args.append([enlarge_3x_save, root, vals, out_img])
         else:
-        	print(f"There's a problem here. {out_img} exists? {out_img.is_file()}. Img shape: {out_img.shape}")
+            print(f"There's a problem here. {out_img} exists? {out_img.is_file()}. Img shape: {out_img.shape}")
 
     print("len input_args", len(input_args))
     print("Execute...\n")
@@ -381,45 +418,50 @@ def create_label(data_json, out_dir, f3x=True, debug=False):
 
     input_args = []
     if not f3x and debug:
-        for i, aoi in enumerate(dict_data["all_images"]):
-            print(i, "aoi:", aoi)
-            gpkg = root/f"{list(aoi['gpkg'].values())}"
-            if not gpkg or not (gpkg).is_file():
-                warnings.warn(f"Geopackage file not found: {aoi}")
-                continue
-            im_dir = (root/aoi["R_band"]).parent
+        for i, (aoi_id, vals) in enumerate(dict_data["all_images"][0].items()):
+            print("aoi:", aoi_id)
+            if not 'gpkg' in vals.keys():
+                warnings.warn(f"Geopackage file not found: {aoi_id}")
+            else:
+                gpkg = vals['gpkg']
+                gpkg = root/f"{gpkg}" if gpkg else None
+                print(f"gpkg: {gpkg}")
+                if not gpkg or not (gpkg).is_file():
+                    warnings.warn(f"Geopackage file not found: {aoi_id}")
+
             if f3x:
                 img_3x_dir = out_dir/"images_masked_3x"
                 image_path = list(img_3x_dir.glob('*3x.tif'))[0]
             else:
-                image_path = root/aoi["R_band"]
-            if not image_path.parent.is_dir():
-                warnings.warn(f"Image directory not found: {str(image_path)}")
-                continue
+                img_file = Path(vals["R_band"])
+                image_path = root/img_file
+                if not image_path.parent.is_dir():
+                    warnings.warn(f"Image directory not found: {str(image_path)}")
+                    continue
 
     print("Creating labels...")
-    for i, aoi in enumerate(dict_data["all_images"]):
-        print(f"{i} aoi: {aoi}\n")
-        mask_dir = 'masks_3x' if f3x else 'masks'
-        print(f"l305: {mask_dir}")
-        gpkg = list(aoi['gpkg'].values())
-        gpkg = root/f"{gpkg[0]}" if len(gpkg)==1 else None
-        print(f"l307: {gpkg}")
-        if not gpkg or not (gpkg).is_file():
-        	warnings.warn(f"Geopackage file not found: {aoi}")
-        	continue
+    for i, (aoi_id, vals) in enumerate(dict_data["all_images"][0].items()):
+        print("aoi:", aoi_id)
+        mask_dir = 'masks_roads_3x' if f3x else 'masks_roads'
         out_dir_mask = out_dir / mask_dir
         Path.mkdir(out_dir_mask, exist_ok=True)
-        print(f"l314: {out_dir_mask}")
+        gpkg = vals['gpkg']
+        gpkg = root / f"{gpkg}" if gpkg else None
+        print(f"gpkg: {gpkg}")
+
+        if not gpkg:
+            continue
+
         name_root = gpkg.stem
-        r_band = root/aoi["R_band"]
+        r_band = root/vals["R_band"]
+
         if f3x:
             image_path = list((out_dir/"images_masked_3x").glob(f"{str(r_band.name).split('_')[0]}*"))
             print(f"l342 | rband: {r_band.name} | glob string: {str(r_band.name).split('_')[0]} | glob:  {image_path}")
-            image_path = image_path[0] if len(image_path)==1 else None
+            image_path = image_path[0] if len(image_path) == 1 else None
             if not image_path:
-            	warnings.warn(f"image_path not found in images masked 3x: {str(r_band.name).split('_')[0]}")
-            	continue
+                warnings.warn(f"image_path not found in images masked 3x: {str(r_band.name).split('_')[0]}")
+                continue
             # name of output rasterized label
             output_path_mask = out_dir_mask / f"{image_path.stem}_gt.tif"
         else:
@@ -430,11 +472,11 @@ def create_label(data_json, out_dir, f3x=True, debug=False):
 
 
         if debug:
-            make_geojsons_and_masks(name_root, image_path, gpkg, output_path_mask)
+            make_geojsons_and_masks(name_root, image_path, gpkg, output_path_mask, burn_val=3)
         elif not output_path_mask.is_file():
-            input_args.append([make_geojsons_and_masks, name_root, image_path, gpkg, output_path_mask])
+            input_args.append([make_geojsons_and_masks, name_root, image_path, gpkg, output_path_mask, 3])
         else:
-        	print(f"There's a problem here. {output_path_mask} exists? {output_path_mask.is_file()}. Name root: {name_root}, image path: {image_path}, gpkg: {gpkg}")
+            print(f"There's a problem here. {output_path_mask} exists? {output_path_mask.is_file()}. Name root: {name_root}, image path: {image_path}, gpkg: {gpkg}")
 
     print("len input_args", len(input_args))
     print("Execute...\n")
@@ -453,8 +495,9 @@ def create_trainval_list(data_json, out_dir, debug=False):
     n_threads = 16
     input_args = []
 
-    tst_aois = {'AB13', 'AB2', 'AB7', 'AB8', 'BC12', 'BC6_P002', 'MB10', 'MB13', 'MB14', 'MB15_P001', 'MB16',
-                'Moncton1', 'ON10_P001', 'ON10_P002', 'ON3', 'ON7', 'ON8', 'QC10_P001', 'QC19', 'QC22', 'QC28', 'SK6'}
+    #tst_aois = {'AB13', 'AB2', 'AB7', 'AB8', 'BC12', 'BC6_P002', 'MB10', 'MB13', 'MB14', 'MB15_P001', 'MB16',
+    #            'Moncton1', 'ON10_P001', 'ON10_P002', 'ON3', 'ON7', 'ON8', 'QC10_P001', 'QC19', 'QC22', 'QC28', 'SK6'}
+    tst_aois = {}
     fw1 = "train_list.txt"
     fw2 = "val_list.txt"
     for tif in (Path(out_dir)/"images_masked_3x_divide").iterdir():
@@ -499,13 +542,13 @@ def write_trainval(tif, tst_aois, fw1, fw2):
             #fw1.write(os.path.join(aoi, "images_masked_3x_divide", img_file) + ' ' +
             #          os.path.join(aoi, "masks_3x_divide", grt_file) + '\n')
     else:
-    	print(f"{gt_glob}: {str(tif.stem).split('3x_')[0]}*{str(tif.stem).split('3x_')[1]}*")
+        print(f"{gt_glob}: {str(tif.stem).split('3x_')[0]}*{str(tif.stem).split('3x_')[1]}*")
 
     fw1.close()
     fw2.close()
 
 
-def create_test_list(data_json, out_dir, debug=False):
+def create_test_list(data_json, out_dir, debug=True):
     """
     Create test list.
     """
@@ -524,7 +567,7 @@ def create_test_list(data_json, out_dir, debug=False):
         else:
             input_args.append([write_test, tif, tst_aois, fw])
 
-    print("len input_args for trainval list write", len(input_args))
+    print("len input_args for test list write", len(input_args))
     print("Execute...\n")
     if not debug:
         with multiprocessing.Pool(n_threads) as pool:
@@ -605,25 +648,41 @@ def check_data(data_json, out_dir, f3x=True, before_prep_only=False, verbose=Tru
                         dst_inv_err = f"Training raster invalid: {file}"
                         is_valid = error_handler(aoi['errors'], dst_inv_err, verbose=verbose)
                     else:
-                        tiles_x = 1 + int(round((metadata['width']-target_width) / width_stride))
-                        tiles_y = 1 + int(round((metadata['height']-target_height) / height_stride))
+                        tiles_x = 1 + math.ceil((metadata['width']-target_width) / width_stride)
+                        tiles_y = 1 + math.ceil((metadata['height']-target_height) / height_stride)
                         nb_exp_tiles = tiles_x * tiles_y
-                        img_tiles_dir = image_path.parent.parent / f'{image_path.parent}_divide'
-                        nb_act_img_tiles = len(list(img_tiles_dir.glob(f'{image_path.stem}*.tif')))
-                        gt_tiles_dir = gt_path.parent.parent / f'{gt_path.parent}_divide'
-                        nb_act_gt_tiles = len(list(gt_tiles_dir.glob(f'{gt_path.stem}*.tif')))
+                        img_tiles_dir = Path(f'{image_path.parent}_divide')
+                        nb_act_img_tiles = len(list(img_tiles_dir.glob(f'{aoi["id"]}_*.tif')))
+                        gt_tiles_dir = Path(f'{gt_path.parent}_divide')
+                        nb_act_gt_tiles = len(list(gt_tiles_dir.glob(f'{aoi["id"]}_*.tif')))
                         if not nb_act_img_tiles == nb_exp_tiles:
-                            ras_tiles_err = f"Number of expected raster tiles {nb_exp_tiles} doesn't match number of actual tiles {nb_act_img_tiles}"
+                            ras_tiles_err = f"Number of expected imagery tiles {nb_exp_tiles} doesn't match number of actual tiles {nb_act_img_tiles}"
                             is_valid = error_handler(aoi['errors'], ras_tiles_err, verbose=verbose)
+                        #else:
+                        #    print(f"Expected number: {nb_exp_tiles}\nActual number img: {nb_act_img_tiles}")
                         if not nb_act_gt_tiles == nb_exp_tiles:
-                            gt_tiles_err = f"Number of expected raster tiles {nb_exp_tiles} doesn't match number of actual tiles {nb_act_gt_tiles}"
+                            gt_tiles_err = f"Number of expected ground truth tiles {nb_exp_tiles} doesn't match number of actual tiles {nb_act_gt_tiles}"
                             is_valid = error_handler(aoi['errors'], gt_tiles_err, verbose=verbose)
+                        #else:
+                        #    print(f"Expected number: {nb_exp_tiles}\nActual number gt: {nb_act_gt_tiles}")
 
         if not is_valid:
             invalid_aois.append(aoi)
         else:
             valid_aois.append(aoi)
 
+    if len(invalid_aois) > 0:
+        keys = invalid_aois[0].keys()
+        with open(out_dir / 'invalid_aois.csv', 'w') as f:
+            dict_writer = csv.DictWriter(f, keys)
+            dict_writer.writeheader()
+            dict_writer.writerows(invalid_aois)
+    if len(valid_aois) > 0:
+        keys = valid_aois[0].keys()
+        with open(out_dir / 'valid_aois.csv', 'w') as f:
+            dict_writer = csv.DictWriter(f, keys)
+            dict_writer.writeheader()
+            dict_writer.writerows(valid_aois)
     return valid_aois, invalid_aois
 
 
