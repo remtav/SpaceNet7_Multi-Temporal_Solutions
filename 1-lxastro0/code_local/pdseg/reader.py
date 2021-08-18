@@ -219,15 +219,15 @@ class SegDataset(object):
 
         if len(parts) == 1:
             img1_name, img2_name, grt1_name, grt2_name = parts[0], None, None, None
-        elif len(parts) == 2:
+        elif len(parts) == 2 or len(parts) == 3:
             if cfg.DATASET.INPUT_IMAGE_NUM == 1:
                 img1_name, img2_name, grt1_name, grt2_name = parts[0], None, parts[1], None
             else:
                 img1_name, img2_name, grt1_name, grt2_name = parts[0], parts[1], None, None
-        elif len(parts) == 3:
-            img1_name, img2_name, grt1_name, grt2_name = parts[0], parts[1], parts[2], None
-        elif len(parts) == 4:
-            img1_name, img2_name, grt1_name, grt2_name = parts[0], parts[1], parts[2], parts[3]
+        # elif len(parts) == 3:
+        #     img1_name, img2_name, grt1_name, grt2_name = parts[0], parts[1], parts[2], None
+        # elif len(parts) == 4:
+        #     img1_name, img2_name, grt1_name, grt2_name = parts[0], parts[1], parts[2], parts[3]
         else:
             raise Exception("File list format incorrect! It should be"
                             " image_name{}label_name\\n".format(cfg.DATASET.SEPARATOR))

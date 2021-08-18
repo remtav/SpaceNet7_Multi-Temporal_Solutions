@@ -19,6 +19,7 @@ from __future__ import print_function
 
 import os
 # GPU memory garbage collection optimization flags
+import rasterio
 from PIL import Image
 from pathlib import Path
 
@@ -100,7 +101,7 @@ def evaluate(cfg, ckpt_dir=None, use_gpu=False, vis=False, vis_dir='vis_out/test
             os.makedirs(vis_dir)
 
     def data_generator():
-        #TODO: check is batch reader compatitable with Windows
+        # TODO: check is batch reader compatitable with Windows
         if use_mpio:
             data_gen = dataset.multiprocess_generator(
                 num_processes=cfg.DATALOADER.NUM_WORKERS,
@@ -163,8 +164,9 @@ def evaluate(cfg, ckpt_dir=None, use_gpu=False, vis=False, vis_dir='vis_out/test
             if vis:
                 preds = np.array(pred, dtype=np.float32)
                 for j in range(preds.shape[0]):
-                    if cnt > len(fls): continue
-                    name = fls[cnt].split('/')[-1].split('.')[0]
+                    if cnt > len(fls):
+                        continue
+                    name = Path(fls[cnt]).stem
                     p = np.squeeze(preds[j])
                     if debug:
                         patch = (p * 255).astype(np.uint8)
@@ -177,10 +179,25 @@ def evaluate(cfg, ckpt_dir=None, use_gpu=False, vis=False, vis_dir='vis_out/test
                         im = Image.fromarray(patch)
                         im.save(os.path.join(vis_dir, name + '.png'))
                     else:
-                        np.save(os.path.join(vis_dir, name + '.npy'), p)
+                        output_file = Path(vis_dir) / f'{name}.tif'
+                        p = p[np.newaxis, :, :]
+                        with rasterio.open(fls[cnt], 'r') as raster:
+                            # scale image transform
+                            inf_meta = raster.meta
+                            inf_meta.update({"driver": "GTiff",
+                                             #"height": p.shape[1],
+                                             #"width": p.shape[2],
+                                             "count": p.shape[0],
+                                             "dtype": 'uint8',
+                                             "compress": 'lzw'})
+                            print(
+                                f'Successfully inferred on {fls[cnt]}\nWriting to file: {output_file}')
+                            with rasterio.open(output_file, 'w+', **inf_meta) as dest:
+                                dest.write(np.uint8(p * 255))
+                        # np.save(os.path.join(vis_dir, name + '.npy'), p)
 
                     cnt += 1
-                print('vis %d npy... (%d tif sample)' % (cnt, cnt//36))
+                print('vis %d npy... (%d tif sample)' % (cnt, cnt // 36))
                 continue
 
             loss = np.mean(np.array(loss))
